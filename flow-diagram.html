@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG Query Flow Diagram</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+            color: #e4e4e4;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2rem;
+            color: #fff;
+        }
+
+        .subtitle {
+            text-align: center;
+            margin-bottom: 40px;
+            color: #8892b0;
+            font-size: 1rem;
+        }
+
+        .flow-container {
+            max-width: 900px;
+            margin: 0 auto;
+            position: relative;
+        }
+
+        .flow-step {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin-bottom: 20px;
+            position: relative;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .flow-step:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(100, 255, 218, 0.3);
+            transform: translateX(5px);
+        }
+
+        .flow-step.active {
+            background: rgba(100, 255, 218, 0.1);
+            border-color: #64ffda;
+            box-shadow: 0 0 30px rgba(100, 255, 218, 0.2);
+        }
+
+        .step-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 10px;
+        }
+
+        .step-number {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, #64ffda, #4fc3f7);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #1a1a2e;
+            font-size: 0.9rem;
+            flex-shrink: 0;
+        }
+
+        .step-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #fff;
+        }
+
+        .step-file {
+            font-size: 0.8rem;
+            color: #64ffda;
+            font-family: 'Monaco', 'Menlo', monospace;
+            margin-left: auto;
+            background: rgba(100, 255, 218, 0.1);
+            padding: 4px 10px;
+            border-radius: 4px;
+        }
+
+        .step-description {
+            color: #a8b2d1;
+            font-size: 0.95rem;
+            line-height: 1.6;
+            margin-left: 51px;
+        }
+
+        .step-details {
+            display: none;
+            margin-top: 15px;
+            margin-left: 51px;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            border-left: 3px solid #64ffda;
+        }
+
+        .flow-step.active .step-details {
+            display: block;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .code-block {
+            background: #0d1117;
+            border-radius: 6px;
+            padding: 12px 15px;
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+            font-size: 0.8rem;
+            overflow-x: auto;
+            color: #c9d1d9;
+            line-height: 1.5;
+        }
+
+        .code-block .keyword {
+            color: #ff7b72;
+        }
+
+        .code-block .string {
+            color: #a5d6ff;
+        }
+
+        .code-block .function {
+            color: #d2a8ff;
+        }
+
+        .code-block .comment {
+            color: #8b949e;
+        }
+
+        .arrow {
+            width: 2px;
+            height: 30px;
+            background: linear-gradient(to bottom, #64ffda, transparent);
+            margin: 0 auto;
+            position: relative;
+        }
+
+        .arrow::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            border-left: 8px solid transparent;
+            border-right: 8px solid transparent;
+            border-top: 10px solid #64ffda;
+        }
+
+        .section-label {
+            text-align: center;
+            padding: 10px 20px;
+            background: rgba(100, 255, 218, 0.1);
+            border-radius: 20px;
+            display: inline-block;
+            margin: 20px auto;
+            font-size: 0.85rem;
+            color: #64ffda;
+            font-weight: 600;
+            letter-spacing: 1px;
+        }
+
+        .section-wrapper {
+            text-align: center;
+            margin: 30px 0;
+        }
+
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-bottom: 40px;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.85rem;
+            color: #8892b0;
+        }
+
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+        }
+
+        .legend-color.frontend { background: #f472b6; }
+        .legend-color.backend { background: #60a5fa; }
+        .legend-color.ai { background: #a78bfa; }
+        .legend-color.db { background: #34d399; }
+
+        .flow-step[data-type="frontend"] { border-left: 4px solid #f472b6; }
+        .flow-step[data-type="backend"] { border-left: 4px solid #60a5fa; }
+        .flow-step[data-type="ai"] { border-left: 4px solid #a78bfa; }
+        .flow-step[data-type="db"] { border-left: 4px solid #34d399; }
+
+        .instructions {
+            text-align: center;
+            color: #8892b0;
+            font-size: 0.9rem;
+            margin-bottom: 30px;
+        }
+
+        .play-button {
+            display: block;
+            margin: 0 auto 40px;
+            padding: 12px 30px;
+            background: linear-gradient(135deg, #64ffda, #4fc3f7);
+            border: none;
+            border-radius: 25px;
+            color: #1a1a2e;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .play-button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 30px rgba(100, 255, 218, 0.4);
+        }
+
+        .play-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <h1>RAG Chatbot Query Flow</h1>
+    <p class="subtitle">Interactive visualization of how a user query flows through the system</p>
+
+    <div class="legend">
+        <div class="legend-item">
+            <div class="legend-color frontend"></div>
+            <span>Frontend</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color backend"></div>
+            <span>Backend API</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color ai"></div>
+            <span>Claude AI</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color db"></div>
+            <span>Vector Database</span>
+        </div>
+    </div>
+
+    <p class="instructions">Click on any step to see details, or press Play to animate the flow</p>
+    <button class="play-button" id="playBtn">&#9658; Play Animation</button>
+
+    <div class="flow-container">
+        <!-- Step 1 -->
+        <div class="flow-step" data-type="frontend" data-step="1">
+            <div class="step-header">
+                <div class="step-number">1</div>
+                <div class="step-title">User Sends Query</div>
+                <div class="step-file">script.js</div>
+            </div>
+            <div class="step-description">
+                User types a question and clicks Send. Frontend packages the query with session ID and sends POST request.
+            </div>
+            <div class="step-details">
+                <div class="code-block">
+<span class="keyword">const</span> response = <span class="keyword">await</span> <span class="function">fetch</span>(<span class="string">`/api/query`</span>, {
+    method: <span class="string">'POST'</span>,
+    body: JSON.<span class="function">stringify</span>({
+        query: <span class="string">"What is RAG?"</span>,
+        session_id: currentSessionId
+    })
+});
+                </div>
+            </div>
+        </div>
+
+        <div class="arrow"></div>
+
+        <!-- Step 2 -->
+        <div class="flow-step" data-type="backend" data-step="2">
+            <div class="step-header">
+                <div class="step-number">2</div>
+                <div class="step-title">FastAPI Endpoint</div>
+                <div class="step-file">app.py</div>
+            </div>
+            <div class="step-description">
+                Request hits POST /api/query endpoint. Creates session if needed, delegates to RAGSystem.
+            </div>
+            <div class="step-details">
+                <div class="code-block">
+<span class="keyword">@app</span>.<span class="function">post</span>(<span class="string">"/api/query"</span>)
+<span class="keyword">async def</span> <span class="function">query_documents</span>(request):
+    session_id = request.session_id <span class="keyword">or</span> create_session()
+    answer, sources = rag_system.<span class="function">query</span>(request.query, session_id)
+    <span class="keyword">return</span> { answer, sources, session_id }
+                </div>
+            </div>
+        </div>
+
+        <div class="arrow"></div>
+
+        <!-- Step 3 -->
+        <div class="flow-step" data-type="backend" data-step="3">
+            <div class="step-header">
+                <div class="step-number">3</div>
+                <div class="step-title">RAG System Orchestration</div>
+                <div class="step-file">rag_system.py</div>
+            </div>
+            <div class="step-description">
+                Main orchestrator retrieves conversation history and prepares the query for AI processing with tools.
+            </div>
+            <div class="step-details">
+                <div class="code-block">
+<span class="keyword">def</span> <span class="function">query</span>(self, query, session_id):
+    history = self.session_manager.<span class="function">get_history</span>(session_id)
+    response = self.ai_generator.<span class="function">generate_response</span>(
+        query=query,
+        conversation_history=history,
+        tools=self.tool_manager.<span class="function">get_tool_definitions</span>()
+    )
+    <span class="keyword">return</span> response, sources
+                </div>
+            </div>
+        </div>
+
+        <div class="arrow"></div>
+
+        <!-- Step 4 -->
+        <div class="flow-step" data-type="ai" data-step="4">
+            <div class="step-header">
+                <div class="step-number">4</div>
+                <div class="step-title">First Claude API Call</div>
+                <div class="step-file">ai_generator.py</div>
+            </div>
+            <div class="step-description">
+                Sends query to Claude with system prompt and search tool definition. Claude decides if search is needed.
+            </div>
+            <div class="step-details">
+                <div class="code-block">
+<span class="comment">// Claude receives:</span>
+{
+    model: <span class="string">"claude-sonnet-4-20250514"</span>,
+    messages: [{ role: <span class="string">"user"</span>, content: query }],
+    tools: [search_course_content],  <span class="comment">// Tool definition</span>
+    tool_choice: { type: <span class="string">"auto"</span> }
+}
+<span class="comment">// Claude returns: stop_reason = "tool_use"</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="arrow"></div>
+
+        <!-- Step 5 -->
+        <div class="flow-step" data-type="ai" data-step="5">
+            <div class="step-header">
+                <div class="step-number">5</div>
+                <div class="step-title">Tool Execution Request</div>
+                <div class="step-file">search_tools.py</div>
+            </div>
+            <div class="step-description">
+                Claude decides to use search_course_content tool. Tool manager routes to CourseSearchTool.
+            </div>
+            <div class="step-details">
+                <div class="code-block">
+<span class="comment">// Claude's tool call:</span>
+{
+    name: <span class="string">"search_course_content"</span>,
+    input: {
+        query: <span class="string">"What is RAG"</span>,
+        course_name: <span class="keyword">null</span>,  <span class="comment">// optional filter</span>
+        lesson_number: <span class="keyword">null</span>   <span class="comment">// optional filter</span>
+    }
+}
+                </div>
+            </div>
+        </div>
+
+        <div class="arrow"></div>
+
+        <!-- Step 6 -->
+        <div class="flow-step" data-type="db" data-step="6">
+            <div class="step-header">
+                <div class="step-number">6</div>
+                <div class="step-title">Vector Store Search</div>
+                <div class="step-file">vector_store.py</div>
+            </div>
+            <div class="step-description">
+                Query is embedded using all-MiniLM-L6-v2 model. ChromaDB performs semantic similarity search.
+            </div>
+            <div class="step-details">
+                <div class="code-block">
+<span class="keyword">def</span> <span class="function">search</span>(self, query, course_name, lesson_number):
+    <span class="comment"># Embed query → 384-dimensional vector</span>
+    <span class="comment"># Search course_content collection</span>
+    results = self.course_content.<span class="function">query</span>(
+        query_texts=[query],
+        n_results=<span class="string">5</span>,
+        where=filter_dict  <span class="comment"># Optional filters</span>
+    )
+    <span class="keyword">return</span> SearchResults.<span class="function">from_chroma</span>(results)
+                </div>
+            </div>
+        </div>
+
+        <div class="arrow"></div>
+
+        <!-- Step 7 -->
+        <div class="flow-step" data-type="db" data-step="7">
+            <div class="step-header">
+                <div class="step-number">7</div>
+                <div class="step-title">Format Search Results</div>
+                <div class="step-file">search_tools.py</div>
+            </div>
+            <div class="step-description">
+                Top 5 matching chunks are formatted with course/lesson context. Sources are stored for UI display.
+            </div>
+            <div class="step-details">
+                <div class="code-block">
+<span class="comment">// Formatted output:</span>
+<span class="string">"[Advanced Retrieval for AI - Lesson 2]
+RAG (Retrieval-Augmented Generation) combines
+retrieval systems with generative AI models..."</span>
+
+<span class="comment">// Sources tracked:</span>
+[<span class="string">"Advanced Retrieval for AI - Lesson 2"</span>,
+ <span class="string">"MCP: Build Rich-Context AI Apps - Lesson 1"</span>]
+                </div>
+            </div>
+        </div>
+
+        <div class="arrow"></div>
+
+        <!-- Step 8 -->
+        <div class="flow-step" data-type="ai" data-step="8">
+            <div class="step-header">
+                <div class="step-number">8</div>
+                <div class="step-title">Second Claude API Call</div>
+                <div class="step-file">ai_generator.py</div>
+            </div>
+            <div class="step-description">
+                Search results sent back to Claude as tool_result. Claude synthesizes a final answer.
+            </div>
+            <div class="step-details">
+                <div class="code-block">
+messages = [
+    { role: <span class="string">"user"</span>, content: query },
+    { role: <span class="string">"assistant"</span>, content: tool_use_block },
+    { role: <span class="string">"user"</span>, content: [{
+        type: <span class="string">"tool_result"</span>,
+        tool_use_id: <span class="string">"toolu_xxx"</span>,
+        content: formatted_search_results
+    }]}
+]
+<span class="comment">// Claude generates final answer</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="arrow"></div>
+
+        <!-- Step 9 -->
+        <div class="flow-step" data-type="backend" data-step="9">
+            <div class="step-header">
+                <div class="step-number">9</div>
+                <div class="step-title">Update Session & Return</div>
+                <div class="step-file">rag_system.py</div>
+            </div>
+            <div class="step-description">
+                Response and sources collected. Conversation saved to session history. Response returned to API layer.
+            </div>
+            <div class="step-details">
+                <div class="code-block">
+<span class="comment"># Save to session for context in follow-ups</span>
+self.session_manager.<span class="function">add_exchange</span>(session_id, query, response)
+
+<span class="comment"># Get sources from tool</span>
+sources = self.tool_manager.<span class="function">get_last_sources</span>()
+
+<span class="keyword">return</span> response, sources
+                </div>
+            </div>
+        </div>
+
+        <div class="arrow"></div>
+
+        <!-- Step 10 -->
+        <div class="flow-step" data-type="frontend" data-step="10">
+            <div class="step-header">
+                <div class="step-number">10</div>
+                <div class="step-title">Display Response</div>
+                <div class="step-file">script.js</div>
+            </div>
+            <div class="step-description">
+                Frontend receives JSON response. Answer rendered as markdown. Sources shown in collapsible section.
+            </div>
+            <div class="step-details">
+                <div class="code-block">
+<span class="keyword">const</span> data = <span class="keyword">await</span> response.<span class="function">json</span>();
+<span class="comment">// { answer: "RAG is...", sources: [...], session_id: "..." }</span>
+
+loadingMessage.<span class="function">remove</span>();
+<span class="function">addMessage</span>(data.answer, <span class="string">'assistant'</span>, data.sources);
+<span class="comment">// Renders markdown, shows collapsible sources</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Toggle step details on click
+        document.querySelectorAll('.flow-step').forEach(step => {
+            step.addEventListener('click', () => {
+                const wasActive = step.classList.contains('active');
+                document.querySelectorAll('.flow-step').forEach(s => s.classList.remove('active'));
+                if (!wasActive) {
+                    step.classList.add('active');
+                }
+            });
+        });
+
+        // Play animation
+        const playBtn = document.getElementById('playBtn');
+        let isPlaying = false;
+
+        playBtn.addEventListener('click', async () => {
+            if (isPlaying) return;
+            isPlaying = true;
+            playBtn.disabled = true;
+            playBtn.textContent = 'Playing...';
+
+            const steps = document.querySelectorAll('.flow-step');
+
+            // Reset all steps
+            steps.forEach(s => s.classList.remove('active'));
+
+            // Animate through each step
+            for (let i = 0; i < steps.length; i++) {
+                steps[i].classList.add('active');
+                steps[i].scrollIntoView({ behavior: 'smooth', block: 'center' });
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                if (i < steps.length - 1) {
+                    steps[i].classList.remove('active');
+                }
+            }
+
+            isPlaying = false;
+            playBtn.disabled = false;
+            playBtn.textContent = '▶ Play Animation';
+        });
+    </script>
+</body>
+</html>
