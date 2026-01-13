@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-**Always use `uv` for package management and running the server. Never use `pip` directly.**
+**Always use `uv` for package management and running the server. Never use `pip` directly. Use `uv run` to run Python files.**
 
 ```bash
 # Install dependencies
