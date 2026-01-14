@@ -27,14 +27,16 @@ function setupEventListeners() {
     // Chat functionality
     sendButton.addEventListener('click', sendMessage);
     chatInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') sendMessage();
+        if (e.key === 'Enter') {
+            sendMessage();
+        }
     });
 
     // New chat button
     newChatButton.addEventListener('click', startNewChat);
 
     // Suggested questions
-    document.querySelectorAll('.suggested-item').forEach(button => {
+    document.querySelectorAll('.suggested-item').forEach((button) => {
         button.addEventListener('click', (e) => {
             const question = e.target.getAttribute('data-question');
             chatInput.value = question;
@@ -43,11 +45,12 @@ function setupEventListeners() {
     });
 }
 
-
 // Chat Functions
 async function sendMessage() {
     const query = chatInput.value.trim();
-    if (!query) return;
+    if (!query) {
+        return;
+    }
 
     // Disable input
     chatInput.value = '';
@@ -69,12 +72,14 @@ async function sendMessage() {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                query: query,
-                session_id: currentSessionId
-            })
+                query,
+                session_id: currentSessionId,
+            }),
         });
 
-        if (!response.ok) throw new Error('Query failed');
+        if (!response.ok) {
+            throw new Error('Query failed');
+        }
 
         const data = await response.json();
 
@@ -86,7 +91,6 @@ async function sendMessage() {
         // Replace loading message with response
         loadingMessage.remove();
         addMessage(data.answer, 'assistant', data.sources);
-
     } catch (error) {
         // Replace loading message with error
         loadingMessage.remove();
@@ -125,9 +129,13 @@ function addMessage(content, type, sources = null, isWelcome = false) {
     let html = `<div class="message-content">${displayContent}</div>`;
 
     if (sources && sources.length > 0) {
-        const sourceLinks = sources.map(s =>
-            s.url ? `<a href="${s.url}" target="_blank">${escapeHtml(s.text)}</a>` : `<span>${escapeHtml(s.text)}</span>`
-        ).join('');
+        const sourceLinks = sources
+            .map((s) =>
+                s.url
+                    ? `<a href="${s.url}" target="_blank">${escapeHtml(s.text)}</a>`
+                    : `<span>${escapeHtml(s.text)}</span>`,
+            )
+            .join('');
         html += `
             <details class="sources-collapsible">
                 <summary class="sources-header">Sources</summary>
@@ -157,7 +165,7 @@ async function startNewChat() {
     if (currentSessionId) {
         try {
             await fetch(`${API_URL}/session/${currentSessionId}`, {
-                method: 'DELETE'
+                method: 'DELETE',
             });
         } catch (error) {
             console.error('Error clearing session:', error);
@@ -174,7 +182,12 @@ async function createNewSession() {
     chatInput.disabled = false;
     sendButton.disabled = false;
     chatInput.focus();
-    addMessage('Welcome to the Course Materials Assistant! I can help you with questions about courses, lessons and specific content. What would you like to know?', 'assistant', null, true);
+    addMessage(
+        'Welcome to the Course Materials Assistant! I can help you with questions about courses, lessons and specific content. What would you like to know?',
+        'assistant',
+        null,
+        true,
+    );
 }
 
 // Load course statistics
@@ -182,7 +195,9 @@ async function loadCourseStats() {
     try {
         console.log('Loading course stats...');
         const response = await fetch(`${API_URL}/courses`);
-        if (!response.ok) throw new Error('Failed to load course stats');
+        if (!response.ok) {
+            throw new Error('Failed to load course stats');
+        }
 
         const data = await response.json();
         console.log('Course data received:', data);
@@ -196,13 +211,12 @@ async function loadCourseStats() {
         if (courseTitles) {
             if (data.course_titles && data.course_titles.length > 0) {
                 courseTitles.innerHTML = data.course_titles
-                    .map(title => `<div class="course-title-item">${title}</div>`)
+                    .map((title) => `<div class="course-title-item">${title}</div>`)
                     .join('');
             } else {
                 courseTitles.innerHTML = '<span class="no-courses">No courses available</span>';
             }
         }
-
     } catch (error) {
         console.error('Error loading course stats:', error);
         // Set default values on error
