@@ -4,6 +4,9 @@ from typing import List, Optional, Dict, Any
 class AIGenerator:
     """Handles interactions with Anthropic's Claude API for generating responses"""
     
+    # Maximum sequential tool rounds per query
+    MAX_TOOL_ROUNDS = 2
+
     # Static system prompt to avoid rebuilding on each call
     SYSTEM_PROMPT = """You are an AI assistant specialized in course materials and educational content with access to tools for course information.
 
@@ -16,8 +19,15 @@ Tool Selection:
 - **Content questions** (specific topics, details, explanations): Use search_course_content
 - **General knowledge**: Answer without tools
 
+Multi-Step Reasoning:
+- You may use up to 2 tool calls sequentially when needed
+- Use multiple tools when:
+  * Comparing information from different courses or lessons
+  * Need both outline AND content information
+  * First search needs refinement with different terms
+- Synthesize all tool results into a single cohesive response
+
 Response Protocol:
-- One tool use per query maximum
 - Provide direct answers without meta-commentary
 - Do not mention "based on the search results" or explain the search process
 
@@ -49,90 +59,75 @@ All responses must be:
                          tool_manager=None) -> str:
         """
         Generate AI response with optional tool usage and conversation context.
-        
+        Supports up to MAX_TOOL_ROUNDS sequential tool calls.
+
         Args:
             query: The user's question or request
             conversation_history: Previous messages for context
             tools: Available tools the AI can use
             tool_manager: Manager to execute tools
-            
+
         Returns:
             Generated response as string
         """
-        
-        # Build system content efficiently - avoid string ops when possible
+        # Build system content
         system_content = (
             f"{self.SYSTEM_PROMPT}\n\nPrevious conversation:\n{conversation_history}"
-            if conversation_history 
+            if conversation_history
             else self.SYSTEM_PROMPT
         )
-        
-        # Prepare API call parameters efficiently
-        api_params = {
-            **self.base_params,
-            "messages": [{"role": "user", "content": query}],
-            "system": system_content
-        }
-        
-        # Add tools if available
-        if tools:
-            api_params["tools"] = tools
-            api_params["tool_choice"] = {"type": "auto"}
-        
-        # Get response from Claude
-        response = self.client.messages.create(**api_params)
-        
-        # Handle tool execution if needed
-        if response.stop_reason == "tool_use" and tool_manager:
-            return self._handle_tool_execution(response, api_params, tool_manager)
-        
-        # Return direct response
-        return response.content[0].text
-    
-    def _handle_tool_execution(self, initial_response, base_params: Dict[str, Any], tool_manager):
-        """
-        Handle execution of tool calls and get follow-up response.
-        
-        Args:
-            initial_response: The response containing tool use requests
-            base_params: Base API parameters
-            tool_manager: Manager to execute tools
-            
-        Returns:
-            Final response text after tool execution
-        """
-        # Start with existing messages
-        messages = base_params["messages"].copy()
-        
-        # Add AI's tool use response
-        messages.append({"role": "assistant", "content": initial_response.content})
-        
-        # Execute all tool calls and collect results
-        tool_results = []
-        for content_block in initial_response.content:
-            if content_block.type == "tool_use":
-                tool_result = tool_manager.execute_tool(
-                    content_block.name, 
-                    **content_block.input
-                )
-                
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": content_block.id,
-                    "content": tool_result
-                })
-        
-        # Add tool results as single message
-        if tool_results:
+
+        # Initialize messages
+        messages = [{"role": "user", "content": query}]
+        round_count = 0
+
+        # Main loop - continue while tool calls needed and under limit
+        while round_count < self.MAX_TOOL_ROUNDS:
+            # Build API params WITH tools
+            api_params = {
+                **self.base_params,
+                "messages": messages,
+                "system": system_content
+            }
+            if tools:
+                api_params["tools"] = tools
+                api_params["tool_choice"] = {"type": "auto"}
+
+            # Make API call
+            response = self.client.messages.create(**api_params)
+
+            # Check termination: no tool use requested
+            if response.stop_reason != "tool_use":
+                return response.content[0].text
+
+            # Check termination: no tool manager
+            if tool_manager is None:
+                return response.content[0].text
+
+            # Execute tools
+            tool_results = []
+            for block in response.content:
+                if block.type == "tool_use":
+                    try:
+                        result = tool_manager.execute_tool(block.name, **block.input)
+                    except Exception as e:
+                        result = f"Tool error: {str(e)}"
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": result
+                    })
+
+            # Update messages for next round
+            messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user", "content": tool_results})
-        
-        # Prepare final API call without tools
+            round_count += 1
+
+        # Max rounds reached - final call WITHOUT tools to force text response
         final_params = {
             **self.base_params,
             "messages": messages,
-            "system": base_params["system"]
+            "system": system_content
         }
-        
-        # Get final response
         final_response = self.client.messages.create(**final_params)
         return final_response.content[0].text

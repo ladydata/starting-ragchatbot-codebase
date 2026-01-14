@@ -232,8 +232,8 @@ class TestAIGeneratorToolCalling:
         assert call_args[1]["tools"] == tools
         assert call_args[1]["tool_choice"] == {"type": "auto"}
 
-    def test_second_call_has_no_tools(self, ai_generator, mock_tool_manager):
-        """Test that follow-up call after tool use doesn't include tools."""
+    def test_second_call_has_tools_for_potential_followup(self, ai_generator, mock_tool_manager):
+        """Test that follow-up call after first tool use still includes tools."""
         tools = mock_tool_manager.get_tool_definitions()
 
         ai_generator.client.messages.create.side_effect = [
@@ -260,9 +260,169 @@ class TestAIGeneratorToolCalling:
             tool_manager=mock_tool_manager
         )
 
-        # Second call should not have tools
+        # Second call SHOULD have tools (for potential second tool call)
         second_call_args = ai_generator.client.messages.create.call_args_list[1]
-        assert "tools" not in second_call_args[1]
+        assert "tools" in second_call_args[1]
+        assert second_call_args[1]["tools"] == tools
+
+
+class TestSequentialToolCalling:
+    """Test suite for sequential tool calling behavior."""
+
+    @pytest.fixture
+    def ai_generator(self):
+        """Create AIGenerator with mocked client."""
+        with patch('ai_generator.anthropic.Anthropic') as mock_anthropic:
+            generator = AIGenerator(api_key="test-key", model="claude-sonnet-4-20250514")
+            return generator
+
+    @pytest.fixture
+    def mock_tool_manager(self):
+        """Create a mock tool manager."""
+        manager = Mock()
+        manager.execute_tool.return_value = "Tool result"
+        manager.get_tool_definitions.return_value = [{"name": "test_tool"}]
+        return manager
+
+    def test_single_tool_call_two_api_calls(self, ai_generator, mock_tool_manager):
+        """Single tool call followed by text response makes 2 API calls."""
+        tools = [{"name": "search_course_content"}]
+
+        ai_generator.client.messages.create.side_effect = [
+            MockResponse(
+                content=[MockContentBlock("tool_use", tool_name="search", tool_input={"q": "test"}, tool_id="t1")],
+                stop_reason="tool_use"
+            ),
+            MockResponse(
+                content=[MockContentBlock("text", text="Answer")],
+                stop_reason="end_turn"
+            )
+        ]
+
+        result = ai_generator.generate_response(query="Q", tools=tools, tool_manager=mock_tool_manager)
+
+        assert ai_generator.client.messages.create.call_count == 2
+        assert result == "Answer"
+
+    def test_two_sequential_tool_calls(self, ai_generator, mock_tool_manager):
+        """Two tool calls before final response makes 3 API calls."""
+        tools = [{"name": "search_course_content"}]
+
+        ai_generator.client.messages.create.side_effect = [
+            MockResponse(
+                content=[MockContentBlock("tool_use", tool_name="search", tool_input={"q": "first"}, tool_id="t1")],
+                stop_reason="tool_use"
+            ),
+            MockResponse(
+                content=[MockContentBlock("tool_use", tool_name="search", tool_input={"q": "second"}, tool_id="t2")],
+                stop_reason="tool_use"
+            ),
+            MockResponse(
+                content=[MockContentBlock("text", text="Combined answer")],
+                stop_reason="end_turn"
+            )
+        ]
+
+        result = ai_generator.generate_response(query="Q", tools=tools, tool_manager=mock_tool_manager)
+
+        assert ai_generator.client.messages.create.call_count == 3
+        assert mock_tool_manager.execute_tool.call_count == 2
+        assert result == "Combined answer"
+
+    def test_max_rounds_forces_final_call_without_tools(self, ai_generator, mock_tool_manager):
+        """After MAX_TOOL_ROUNDS, final call has no tools."""
+        tools = [{"name": "search_course_content"}]
+
+        ai_generator.client.messages.create.side_effect = [
+            MockResponse(
+                content=[MockContentBlock("tool_use", tool_name="search", tool_input={"q": "1"}, tool_id="t1")],
+                stop_reason="tool_use"
+            ),
+            MockResponse(
+                content=[MockContentBlock("tool_use", tool_name="search", tool_input={"q": "2"}, tool_id="t2")],
+                stop_reason="tool_use"
+            ),
+            MockResponse(
+                content=[MockContentBlock("text", text="Best effort")],
+                stop_reason="end_turn"
+            )
+        ]
+
+        ai_generator.generate_response(query="Q", tools=tools, tool_manager=mock_tool_manager)
+
+        # Third call (after 2 tool rounds) should NOT have tools
+        third_call = ai_generator.client.messages.create.call_args_list[2]
+        assert "tools" not in third_call[1]
+
+    def test_no_tool_use_returns_immediately(self, ai_generator):
+        """Direct response without tool use makes only 1 API call."""
+        ai_generator.client.messages.create.return_value = MockResponse(
+            content=[MockContentBlock("text", text="Direct answer")],
+            stop_reason="end_turn"
+        )
+
+        result = ai_generator.generate_response(query="Q", tools=[{"name": "tool"}], tool_manager=Mock())
+
+        assert ai_generator.client.messages.create.call_count == 1
+        assert result == "Direct answer"
+
+    def test_tool_error_continues_gracefully(self, ai_generator, mock_tool_manager):
+        """Tool exception is caught and returned as error string."""
+        tools = [{"name": "search"}]
+        mock_tool_manager.execute_tool.side_effect = Exception("DB connection failed")
+
+        ai_generator.client.messages.create.side_effect = [
+            MockResponse(
+                content=[MockContentBlock("tool_use", tool_name="search", tool_input={"q": "test"}, tool_id="t1")],
+                stop_reason="tool_use"
+            ),
+            MockResponse(
+                content=[MockContentBlock("text", text="Sorry, I encountered an error.")],
+                stop_reason="end_turn"
+            )
+        ]
+
+        result = ai_generator.generate_response(query="Q", tools=tools, tool_manager=mock_tool_manager)
+
+        # Should not raise, should return graceful response
+        assert "Sorry" in result
+
+        # Verify error was passed to Claude
+        second_call = ai_generator.client.messages.create.call_args_list[1]
+        tool_result_msg = second_call[1]["messages"][2]
+        assert "Tool error" in tool_result_msg["content"][0]["content"]
+
+    def test_messages_accumulate_across_rounds(self, ai_generator, mock_tool_manager):
+        """Message history grows correctly across tool rounds."""
+        tools = [{"name": "search"}]
+
+        ai_generator.client.messages.create.side_effect = [
+            MockResponse(
+                content=[MockContentBlock("tool_use", tool_name="search", tool_input={"q": "1"}, tool_id="t1")],
+                stop_reason="tool_use"
+            ),
+            MockResponse(
+                content=[MockContentBlock("tool_use", tool_name="search", tool_input={"q": "2"}, tool_id="t2")],
+                stop_reason="tool_use"
+            ),
+            MockResponse(
+                content=[MockContentBlock("text", text="Final")],
+                stop_reason="end_turn"
+            )
+        ]
+
+        ai_generator.generate_response(query="Q", tools=tools, tool_manager=mock_tool_manager)
+
+        # Final call should have accumulated messages:
+        # user query, assistant tool_use 1, user tool_result 1, assistant tool_use 2, user tool_result 2
+        final_call = ai_generator.client.messages.create.call_args_list[2]
+        messages = final_call[1]["messages"]
+        assert len(messages) == 5
+        assert messages[0]["role"] == "user"
+        assert messages[1]["role"] == "assistant"
+        assert messages[2]["role"] == "user"
+        assert messages[3]["role"] == "assistant"
+        assert messages[4]["role"] == "user"
 
 
 class TestAIGeneratorSystemPrompt:
@@ -283,3 +443,17 @@ class TestAIGeneratorSystemPrompt:
         assert "outline" in prompt.lower() or "structure" in prompt.lower()
         # Should guide search tool for content questions
         assert "content" in prompt.lower() or "search" in prompt.lower()
+
+    def test_system_prompt_allows_multi_step_reasoning(self):
+        """Verify system prompt allows multiple tool calls."""
+        prompt = AIGenerator.SYSTEM_PROMPT
+
+        # Should mention multi-step or sequential tool usage
+        assert "2 tool calls" in prompt or "multiple tools" in prompt.lower()
+        # Should NOT have the old "one tool per query" restriction
+        assert "one tool use per query maximum" not in prompt.lower()
+
+    def test_max_tool_rounds_constant(self):
+        """Verify MAX_TOOL_ROUNDS is configured."""
+        assert hasattr(AIGenerator, 'MAX_TOOL_ROUNDS')
+        assert AIGenerator.MAX_TOOL_ROUNDS == 2
